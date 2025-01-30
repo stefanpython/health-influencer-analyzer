@@ -3,13 +3,23 @@
 import React, { useState } from "react";
 import { ArrowLeft, Search, PlusCircle } from "lucide-react";
 
+const GOOGLE_API_KEY = "AIzaSyAo_fXbPgRoKDXfzP7uR8r9PqoXYoZnAkI";
+
 const ResearchTasks = () => {
-  const [selectedMode, setSelectedMode] = useState("specific"); // specific or discover
+  // Core state
+  const [selectedMode, setSelectedMode] = useState("specific");
   const [selectedTimeRange, setSelectedTimeRange] = useState("lastMonth");
   const [includeRevenue, setIncludeRevenue] = useState(true);
   const [verifyJournals, setVerifyJournals] = useState(true);
-
   const [selectedJournals, setSelectedJournals] = useState([]);
+
+  // API integration state
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState(null);
+  const [influencerName, setInfluencerName] = useState("");
+  const [researchNotes, setResearchNotes] = useState("");
+  const [productsPerInfluencer, setProductsPerInfluencer] = useState("10");
+  const [claimsToAnalyze, setClaimsToAnalyze] = useState("50");
 
   const toggleJournal = (journal) => {
     setSelectedJournals((prev) =>
@@ -35,8 +45,187 @@ const ResearchTasks = () => {
     setSelectedJournals([]);
   };
 
+  // Google AI Studio API integration
+  const analyzeInfluencer = async () => {
+    setIsLoading(true);
+    setApiError(null);
+
+    try {
+      // 1. Classify influencer type
+      const nameResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GOOGLE_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `CLASSIFICATION TASK: Strictly categorize "${influencerName.trim()}" into ONE of these:
+                - health influencer
+                - fitness expert
+                - medical professional
+                - wellness coach
+                Respond ONLY with the lowercase category name, no punctuation. Example: "medical professional"`,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      if (!nameResponse.ok) {
+        const errorData = await nameResponse.json();
+        console.error("Name classification error:", errorData);
+        throw new Error(
+          "Failed to classify influencer. Please try a different name."
+        );
+      }
+
+      const nameData = await nameResponse.json();
+      const rawClassification = nameData.candidates[0].content.parts[0].text
+        .trim()
+        .toLowerCase();
+
+      // Validate classification
+      const validCategories = new Set([
+        "health influencer",
+        "fitness expert",
+        "medical professional",
+        "wellness coach",
+      ]);
+
+      if (!validCategories.has(rawClassification)) {
+        throw new Error(`Invalid classification: ${rawClassification}`);
+      }
+
+      // 2. Analyze research notes with JSON validation
+      const notesResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GOOGLE_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `ANALYSIS TASK: Process these research notes: "${researchNotes.trim()}"
+                STRICT FORMAT: { 
+                  "claims": [
+                    {
+                      "claim": "exact quoted claim",
+                      "verificationStatus": "verified/unverified/uncertain",
+                      "confidence": "high/medium/low"
+                    }
+                  ]
+                }
+                If analysis is impossible, return: { "error": "reason" } 
+                Do NOT include any text outside the JSON structure.`,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      if (!notesResponse.ok) {
+        const errorData = await notesResponse.json();
+        console.error("Notes analysis error:", errorData);
+        throw new Error(
+          "Analysis service unavailable. Please try again later."
+        );
+      }
+
+      const notesData = await notesResponse.json();
+      const rawAnalysis = notesData.candidates[0].content.parts[0].text.trim();
+
+      // Robust JSON validation
+      let notesAnalysis;
+      try {
+        notesAnalysis = JSON.parse(rawAnalysis);
+
+        if (notesAnalysis.error) {
+          throw new Error(`Analysis rejected: ${notesAnalysis.error}`);
+        }
+
+        if (!notesAnalysis.claims || !Array.isArray(notesAnalysis.claims)) {
+          throw new Error("Invalid analysis format received");
+        }
+
+        // Validate each claim structure
+        const isValid = notesAnalysis.claims.every(
+          (claim) => claim.claim && claim.verificationStatus && claim.confidence
+        );
+
+        if (!isValid) {
+          throw new Error("Some claims are missing required fields");
+        }
+      } catch (parseError) {
+        console.error(
+          "JSON Parse Error:",
+          parseError,
+          "Raw Response:",
+          rawAnalysis
+        );
+        throw new Error(
+          "Failed to process analysis. Please simplify your research notes."
+        );
+      }
+
+      // Prepare research data
+      const researchData = {
+        influencer: {
+          name: influencerName.trim(),
+          classification: rawClassification,
+          researchNotes: researchNotes.trim(),
+          notesAnalysis: notesAnalysis.claims,
+        },
+        configuration: {
+          mode: selectedMode,
+          timeRange: selectedTimeRange,
+          includeRevenue,
+          verifyJournals,
+          selectedJournals,
+          productsPerInfluencer,
+          claimsToAnalyze,
+        },
+      };
+
+      console.log("Research Configuration:", researchData);
+      return researchData;
+    } catch (error) {
+      console.error("API Error:", error);
+      setApiError(
+        error.message.startsWith("Failed to process analysis")
+          ? error.message
+          : `Research failed: ${error.message}`
+      );
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  const handleStartResearch = async () => {
+    // Validation
+    if (!influencerName.trim()) {
+      setApiError("Please enter an influencer name");
+      return;
+    }
+
+    if (verifyJournals && selectedJournals.length === 0) {
+      setApiError("Please select at least one journal for verification");
+      return;
+    }
+
+    await analyzeInfluencer();
+  };
+
   return (
-    <div className="min-h-screen  bg-slate-900 text-white p-8">
+    <div className="min-h-screen bg-slate-900 text-white p-8">
       <nav className="flex items-center justify-between mb-8">
         <div className="flex items-center space-x-4">
           <img
@@ -48,7 +237,7 @@ const ResearchTasks = () => {
         </div>
 
         <div className="flex flex-wrap items-center space-x-6">
-          <a href="#" className="text-gray-300">
+          <a href="/leaderboard" className="text-gray-300">
             Leaderboard
           </a>
           <a href="#" className="text-gray-300">
@@ -141,7 +330,8 @@ const ResearchTasks = () => {
               </label>
               <input
                 type="text"
-                defaultValue="10"
+                value={productsPerInfluencer}
+                onChange={(e) => setProductsPerInfluencer(e.target.value)}
                 className="w-full bg-slate-800/80 rounded p-2 border border-slate-700"
               />
               <p className="text-xs text-gray-400 mt-1">
@@ -206,6 +396,8 @@ const ResearchTasks = () => {
               <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <input
                 type="text"
+                value={influencerName}
+                onChange={(e) => setInfluencerName(e.target.value)}
                 placeholder="Enter influencer name"
                 className="w-full bg-slate-800/80 rounded p-2 pl-10 border border-slate-700"
               />
@@ -217,7 +409,8 @@ const ResearchTasks = () => {
               </label>
               <input
                 type="text"
-                defaultValue="50"
+                value={claimsToAnalyze}
+                onChange={(e) => setClaimsToAnalyze(e.target.value)}
                 className="w-full bg-slate-800/80 rounded p-2 border border-slate-700"
               />
               <p className="text-xs text-gray-400 mt-1">
@@ -274,15 +467,33 @@ const ResearchTasks = () => {
             Notes for Research Assistant
           </label>
           <textarea
+            value={researchNotes}
+            onChange={(e) => setResearchNotes(e.target.value)}
             placeholder="Add any specific instructions or focus areas..."
             className="w-full h-32 bg-slate-800/80 rounded p-3 border border-slate-700"
           />
         </div>
 
+        {apiError && (
+          <div className="mt-4 text-red-400 text-sm">{apiError}</div>
+        )}
+
         <div className="flex justify-end mt-6">
-          <button className="bg-emerald-400 hover:bg-emerald-500 text-slate-900 px-4 py-2 rounded flex items-center">
-            <span className="mr-2">+</span>
-            Start Research
+          <button
+            onClick={handleStartResearch}
+            disabled={isLoading}
+            className={`bg-emerald-400 hover:bg-emerald-500 text-slate-900 px-4 py-2 rounded flex items-center ${
+              isLoading ? "opacity-50 cursor-not-allowed" : ""
+            }`}
+          >
+            {isLoading ? (
+              <span className="mr-2">Processing...</span>
+            ) : (
+              <>
+                <span className="mr-2">+</span>
+                Start Research
+              </>
+            )}
           </button>
         </div>
       </div>
