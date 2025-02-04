@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { ArrowLeft, Search, PlusCircle } from "lucide-react";
 
-const GOOGLE_API_KEY = "AIzaSyAo_fXbPgRoKDXfzP7uR8r9PqoXYoZnAkI";
+const GOOGLE_API_KEY = "";
 
 const ResearchTasks = () => {
   // Core state
