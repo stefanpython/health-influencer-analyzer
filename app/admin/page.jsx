@@ -3,8 +3,6 @@
 import React, { useState } from "react";
 import { ArrowLeft, Search, PlusCircle } from "lucide-react";
 
-const GOOGLE_API_KEY = "";
-
 const ResearchTasks = () => {
   // Core state
   const [selectedMode, setSelectedMode] = useState("specific");
